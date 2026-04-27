@@ -1,0 +1,37 @@
+{
+  "disease": "CRC4",
+  "model": "MTMFTransformer",
+  "seed": 418,
+  "phase": 1,
+  "fold": "phase1",
+  "feature_list": [
+    "ko",
+    "species",
+    "untarget_pos",
+    "untarget_neg"
+  ],
+  "per_mod_index": {
+    "ko": [
+      0,
+      1116
+    ],
+    "species": [
+      1116,
+      2643
+    ],
+    "untarget_pos": [
+      2643,
+      3935
+    ],
+    "untarget_neg": [
+      3935,
+      5109
+    ]
+  },
+  "bg_repeats": 20,
+  "bg_size": 25,
+  "device": "cuda",
+  "stream_csv": true,
+  "only_mods": null,
+  "ckpt": "./Checkpoints/CRC4_holdout/phase1/evaluate/seed418/phase1/model_best.pkl"
+}

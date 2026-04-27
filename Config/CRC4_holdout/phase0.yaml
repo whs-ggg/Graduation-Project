@@ -1,0 +1,43 @@
+# Config/CRC.yaml
+
+MTMFTransformer:
+  ko,species,untarget_pos,untarget_neg:
+    n_layers: 1  # Transformer层数
+    num_bottleneck: 8  # Bottleneck数量
+    batch_size: 4  # 批量大小
+    lr: 1e-5  # 学习率
+
+FT:
+  ko:
+    n_blocks: 1  # 块数
+    lr: 0.00001  # 学习率
+    batch_size: 8  # 批量大小
+  species:
+    n_blocks: 2  # 块数
+    lr: 0.00001  # 学习率
+    batch_size: 4  # 批量大小
+  ks:
+    n_blocks: 2  # 块数
+    lr: 0.0001  # 学习率
+    batch_size: 16  # 批量大小
+
+MBT:
+  ko,species:
+    n_layers: 2  # Transformer层数
+    m_layers: 3  # MBT的层数
+    num_bottleneck: 4  # Bottleneck数量
+    hidden_size: 0  # 隐藏层大小
+    lr: 0.00006  # 学习率
+    batch_size: 8  # 批量大小
+
+FT-Concat:
+  ko,species:
+    n_blocks: 3  # 块数
+    lr: 0.00001  # 学习率
+    batch_size: 16  # 批量大小
+
+FT-Vote:
+  ko,species:
+    n_blocks: 2  # 块数
+    lr: 0.0001  # 学习率
+    batch_size: 8  # 批量大小

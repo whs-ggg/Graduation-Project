@@ -1,0 +1,2 @@
+n_layers,num_bottleneck,batch_size,lr,use_bottleneck,btn_init,use_cross_atn,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+1,8,4,1e-05,True,embed,True,418,phase3,"ko,species,untarget_pos,untarget_neg",holdout-phase3-seed418,0.893,0.8571,0.8235,0.9333,0.875

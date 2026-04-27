@@ -1,0 +1,26 @@
+{
+  "input_csv": "./datas/ko_abundance.csv",
+  "n_samples": 340,
+  "n_features_original": 9852,
+  "params": {
+    "nonzero_ratio": 0.2,
+    "abundance_min": 0.001,
+    "id_col": "sample_id",
+    "label_col": "label"
+  },
+  "steps": [
+    {
+      "step": "nonzero_ratio",
+      "threshold": 0.2,
+      "kept": 5892,
+      "dropped": 3960
+    },
+    {
+      "step": "abundance_relative",
+      "mode": "col_max>threshold",
+      "threshold": 0.001,
+      "kept": 1116,
+      "dropped": 4776
+    }
+  ]
+}
