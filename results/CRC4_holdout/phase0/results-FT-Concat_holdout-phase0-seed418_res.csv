@@ -1,0 +1,2 @@
+n_blocks,lr,batch_size,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+1,1e-05,4,418,baseline,"ko,species,untarget_pos,untarget_neg",holdout-phase0-seed418,0.9358,0.9194,0.9412,0.96,0.9505

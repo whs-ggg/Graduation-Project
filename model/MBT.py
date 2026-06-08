@@ -110,10 +110,11 @@ class MBT(nn.Module):
 
     def forward(self, **features):
         # print("============  numpy to tensor  =================\n\n")
-        # numpy --> tensor
+        device = next(self.parameters()).device
+        # numpy --> tensor（与当前模块所在 device 一致，兼容 DataParallel 子卡）
         for name, feature in features.items():
             if isinstance(feature, np.ndarray):
-                features[name] = torch.from_numpy(feature).type(torch.float32).to('cuda')
+                features[name] = torch.from_numpy(feature).type(torch.float32).to(device)
 
         # Generate Embedding
         features_embed = OrderedDict()
@@ -127,8 +128,9 @@ class MBT(nn.Module):
 
         # Bottleneck input --- Init
         if self.use_bottleneck:
-            bottleneck = torch.normal(mean=0, std=0.02,
-                                      size=(1, self.num_bottleneck, self.d_token)).cuda()
+            bottleneck = torch.empty(
+                1, self.num_bottleneck, self.d_token, device=device, dtype=torch.float32
+            ).normal_(mean=0, std=0.02)
             bottleneck = bottleneck.expand(list(features_embed.values())[0].shape[0], -1, -1)
 
         # 先进行FT-Transformer-Block  更新 ko_embed, go_embed

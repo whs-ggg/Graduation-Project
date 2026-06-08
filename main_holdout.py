@@ -32,18 +32,30 @@ from evaluate import get_trained_model  # 复用写好的加载 best.ckpt 的工
 
 
 # 可见 GPU（字符串，逗号分隔、无空格，例如 "0,1,2,3" 或 "0"）
-GPU = "2,3"
+GPU = "3"
 
 # “数据疾病名（根目录名）”——指向已划分好的三划分目录所在的根
 # 例如：./Data/CRC4_holdout/phase1/...  -> HOLDOUT_ROOT = "CRC4_holdout"
 HOLDOUT_ROOT = "CRC4_holdout"
 
 # YAML 的疾病名（用于读取 Config/{YAML_DISEASE}.yaml）
-# 通常仍然是原来的 "CRC4"
+# 通常仍然是原来的 "CRC4"。注意：main_holdout 当前不按 phase 换配置文件；
+# Config/CRC4_holdout/phase*.yaml 为人工对照/其它脚本用，已与 CRC4.yaml 同步写入 MVIB 等条目。
 YAML_DISEASE = "CRC4"
 
 # 训练的模型与特征（必须与 YAML 中的键一致）
-MODEL_TYPE = "MTMFTransformer"
+# 切换模型：只保留一行「生效」的 MODEL_TYPE，其余用 # 注释即可
+# MSFT 在本仓库中对应类名 MTMFTransformer（Config 键亦为 MTMFTransformer）
+
+# MODEL_TYPE = "MBT"
+# MODEL_TYPE = "MTMFTransformer"
+# MODEL_TYPE = "FT"              # 需在 Config 的 FT: 下配置 ko,species,untarget_pos,untarget_neg
+# MODEL_TYPE = "FT-Concat"       # 需在 Config 的 FT-Concat: 下配置 ko,species,untarget_pos,untarget_neg
+# MODEL_TYPE = "FT-Vote"         # 需在 Config 的 FT-Vote: 下配置 ko,species,untarget_pos,untarget_neg
+# MODEL_TYPE = "MLP"             # 需在 Config 的 MLP: 下配置 ko,species,untarget_pos,untarget_neg
+# MODEL_TYPE = "XGBoost"         # pip install xgboost；Config 的 XGBoost: 下配置同上特征键
+MODEL_TYPE = "MDL4Microbiome"  # Lee & Rho, Sci Rep 2022 — 每模态 MLP 再拼接
+# MODEL_TYPE = "MVIB"          # Multimodal Variational Information Bottleneck (PLOS Comp Biol 2022)
 FEATURES = "ko,species,untarget_pos,untarget_neg"
 
 # 哪些 phase 要跑（存在的才会跑；不存在会自动跳过）
@@ -54,6 +66,11 @@ SEEDS = [388,403,418,433,448]
 
 # 是否从 YAML 读取超参；若 False，则使用 KWARGS_FOR_TRAIN
 USE_CONFIG = True
+# 若 train() 发现 results 里已有相同超参+seed+fold 的记录，默认会跳过训练并打印「paras has trained.」。
+# 交互式终端下会询问是否删除对应 CSV 行并重训；非交互/管道可加环境变量：
+#   MSFT_FORCE_RETRAIN=1   强制重训（不删 CSV，训练结束会再追加一行，可能重复）
+#   MSFT_AUTO_OVERWRITE=1  自动删重复行并重训（无询问）
+#   MSFT_NO_PROMPT=1       不询问且不重训（等同旧版直接跳过）
 KWARGS_FOR_TRAIN = {
     "lr": 1e-5,
     "batch_size": 4,
@@ -137,12 +154,72 @@ def _eval_on_ids(
         inputs_dim = OrderedDict((k, v.shape) for k, v in x_tr.items())
         X_te_for_pred = x_te  # dict/SliceDict
 
-    # 将必须参数补齐（若 YAML 没写）
+    # ---------- 按模型类型组装 modelconfig / 预测输入（与 train() 一致）----------
+    # 【原统一写法，仅适配 MTMFTransformer；若只用 MSFT 可恢复下面注释并注释掉后面分支】
+    # modelconfig2 = dict(modelconfig)
+    # modelconfig2.setdefault("use_bottleneck", USE_BOTTLENECK)
+    # modelconfig2.setdefault("btn_init", BTN_INIT)
+    # modelconfig2.setdefault("use_cross_atn", USE_CROSS_ATN)
+    # modelconfig2["inputs_dim"] = inputs_dim
+    # net = get_trained_model(..., modelconfig=modelconfig2, ...)
+    # y_proba = net.predict_proba(X_te_for_pred)[:, 1]
+
     modelconfig2 = dict(modelconfig)
-    modelconfig2.setdefault("use_bottleneck", USE_BOTTLENECK)
-    modelconfig2.setdefault("btn_init", BTN_INIT)
-    modelconfig2.setdefault("use_cross_atn", USE_CROSS_ATN)
-    modelconfig2["inputs_dim"] = inputs_dim  # 关键：MTMFTransformer 需要字典形式
+    X_pred = X_te_for_pred
+
+    if model_name == "MTMFTransformer":
+        modelconfig2.setdefault("use_bottleneck", USE_BOTTLENECK)
+        modelconfig2.setdefault("btn_init", BTN_INIT)
+        modelconfig2.setdefault("use_cross_atn", USE_CROSS_ATN)
+        modelconfig2["inputs_dim"] = inputs_dim
+    elif model_name == "MBT":
+        modelconfig2.setdefault("use_bottleneck", USE_BOTTLENECK)
+        modelconfig2["inputs_dim"] = inputs_dim
+    elif model_name == "MVIB":
+        for k in ("use_bottleneck", "btn_init", "use_cross_atn"):
+            modelconfig2.pop(k, None)
+        modelconfig2["inputs_dim"] = inputs_dim
+    elif model_name == "MDL4Microbiome":
+        for k in ("use_bottleneck", "btn_init", "use_cross_atn"):
+            modelconfig2.pop(k, None)
+        modelconfig2["inputs_dim"] = inputs_dim
+    elif model_name in ("FT", "FT-Concat"):
+        for k in ("use_bottleneck", "btn_init", "use_cross_atn", "inputs_dim"):
+            modelconfig2.pop(k, None)
+        if isinstance(x_tr, np.ndarray):
+            n_num = int(x_tr.shape[1])
+        else:
+            n_num = int(np.concatenate(list(x_tr.values()), axis=1).shape[1])
+            X_pred = np.concatenate(list(x_te.values()), axis=1).astype(np.float32)
+        modelconfig2["last_layer_query_idx"] = [-1]
+        modelconfig2["d_out"] = 1
+        modelconfig2["cat_cardinalities"] = None
+        modelconfig2["n_num_features"] = n_num
+    elif model_name == "FT-Vote":
+        for k in ("use_bottleneck", "btn_init", "use_cross_atn", "inputs_dim"):
+            modelconfig2.pop(k, None)
+        modelconfig2["last_layer_query_idx"] = [-1]
+        modelconfig2["d_out"] = 1
+        modelconfig2["cat_cardinalities"] = None
+        modelconfig2["n_num_features"] = inputs_dim
+    elif model_name == "MLP":
+        for k in ("use_bottleneck", "btn_init", "use_cross_atn", "inputs_dim"):
+            modelconfig2.pop(k, None)
+        if isinstance(x_tr, np.ndarray):
+            n_in = int(x_tr.shape[1])
+        else:
+            n_in = int(np.concatenate(list(x_tr.values()), axis=1).shape[1])
+            X_pred = np.concatenate(list(x_te.values()), axis=1).astype(np.float32)
+        modelconfig2["in_dim"] = n_in
+    elif model_name == "XGBoost":
+        for k in ("use_bottleneck", "btn_init", "use_cross_atn", "inputs_dim"):
+            modelconfig2.pop(k, None)
+        if isinstance(x_tr, np.ndarray):
+            pass
+        else:
+            X_pred = np.concatenate(list(x_te.values()), axis=1).astype(np.float32)
+    else:
+        raise ValueError(f"main_holdout 暂不支持该 model_name 的评估配置: {model_name}")
 
     # 载入 best checkpoint（evaluate.get_trained_model 内部已适配多种目录布局）
     net = get_trained_model(
@@ -156,7 +233,7 @@ def _eval_on_ids(
     )
 
     # 预测（正类概率）
-    y_proba = net.predict_proba(X_te_for_pred)[:, 1]
+    y_proba = net.predict_proba(X_pred)[:, 1]
     y_pred = (y_proba >= 0.5).astype(int)
 
     # 指标
@@ -171,6 +248,70 @@ def _eval_on_ids(
     out["seed"] = seed
     out["phase"] = phase
     return out
+
+
+def _plot_holdout_phase_curves(plot_dir: Path, model_type: str, phase: int, seeds: list) -> None:
+    """读取各 seed 的 history_{model}_seed*.csv，生成全种子 loss 汇总图。"""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("[WARN] matplotlib 未安装，跳过 phase 汇总曲线。pip install matplotlib")
+        return
+
+    if not plot_dir.is_dir():
+        return
+
+    histories = {}
+    for seed in seeds:
+        p = plot_dir / f"history_{model_type}_seed{seed}.csv"
+        if p.exists():
+            histories[int(seed)] = pd.read_csv(p)
+        else:
+            # 兼容旧文件名（无模型前缀）
+            legacy = plot_dir / f"history_seed{seed}.csv"
+            if legacy.exists():
+                histories[int(seed)] = pd.read_csv(legacy)
+
+    if not histories:
+        print(f"[Plot] {plot_dir} 下无 history_{model_type}_seed*.csv（或旧版 history_seed*.csv），跳过汇总图。")
+        return
+
+    for old in plot_dir.glob("*_loss_acc.png"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+    seed_sorted = sorted(histories.keys())
+    try:
+        import matplotlib as mpl
+
+        cmap = mpl.colormaps["tab10"]
+    except (AttributeError, KeyError, TypeError):
+        cmap = plt.cm.get_cmap("tab10")
+    colors = {s: cmap(float(i % 10) / 9.0) for i, s in enumerate(seed_sorted)}
+
+    fig, ax = plt.subplots(figsize=(10, 5.5), constrained_layout=True)
+    for s in seed_sorted:
+        df = histories[s]
+        ep = df["epoch"].values
+        c = colors[s]
+        if "train_loss" in df.columns:
+            ax.plot(ep, df["train_loss"], color=c, linestyle="-", linewidth=1.5, label=f"{s} train", alpha=0.9)
+        if "valid_loss" in df.columns:
+            ax.plot(ep, df["valid_loss"], color=c, linestyle="--", linewidth=1.5, label=f"{s} valid", alpha=0.9)
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("loss")
+    ax.set_title(f"{model_type} phase{phase} — loss (color=seed, solid=train, dashed=valid)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=7, ncol=2, framealpha=0.9)
+    loss_path = plot_dir / f"{model_type}_phase{phase}_loss_all_seeds.png"
+    fig.savefig(loss_path, dpi=150)
+    plt.close(fig)
+    print(f"[Plot] {loss_path}")
 
 
 def main():
@@ -248,11 +389,18 @@ def main():
                 row[f"test_{k}"] = v
             results.append(row)
 
-    # 写出汇总 CSV
+        _plot_holdout_phase_curves(
+            Path("./results") / disease_tag / "plots",
+            MODEL_TYPE,
+            phase,
+            SEEDS,
+        )
+
+    # 汇总 CSV：直接放在 CRC4_holdout 下，文件名带模型名
     if results:
         out_dir = Path("./results") / HOLDOUT_ROOT
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_csv = out_dir / f"holdout_summary.csv"
+        out_csv = out_dir / f"holdout_summary_{MODEL_TYPE}.csv"
         pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8")
         print(f"\n[Done] 汇总结果已写入：{out_csv}")
     else:

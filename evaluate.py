@@ -22,8 +22,67 @@ from dateset import (
     _align_by_sample_id,        # 复用多模态对齐逻辑（≥3 模态时与训练完全一致）
 )
 
-from model.MTMF import MTMFTransformer
+from model.MTMF import MTMFTransformer, FT_Vote
+from model.MBT import MBT
+from model.MVIB import MVIB
+from model.MDL4Microbiome import MDL4Microbiome
+from model.FT_transformer import FTTransformer
+from model.TabularMLP import TabularMLP
 from model.MSFT_explainable import MTMFTransformer_explainable
+
+
+def _eval_checkpoint_candidates(
+    disease: str,
+    seed: int,
+    phase,
+    model_name: str,
+    fold_name: str | None,
+) -> list:
+    """与 get_trained_model 内原逻辑一致：候选 checkpoint 目录列表。"""
+    candidates = []
+    try:
+        _ph = int(phase)
+    except (TypeError, ValueError):
+        _ph = 0
+    _phase_sub = "baseline" if _ph == 0 else f"phase{_ph}"
+    candidates.append(f"./Checkpoints/{disease}/evaluate/{model_name}/seed{seed}/{_phase_sub}")
+    base_phase = f"./Checkpoints/{disease}/phase{phase}/{model_name}/{seed}"
+    if fold_name:
+        candidates.append(os.path.join(base_phase, fold_name))
+    candidates.append(base_phase)
+    if str(phase) == "0" or phase == 0:
+        candidates.append(f"./Checkpoints/{disease}/evaluate/seed{seed}/baseline")
+    parts = str(disease).split("/")
+    if len(parts) >= 2:
+        candidates.append(f"./Checkpoints/{disease}/evaluate/seed{seed}/baseline")
+    candidates.append(f"./Checkpoints/{disease}/evaluate/seed{seed}/phase{phase}")
+    candidates.append(f"./Checkpoints/{disease}/evaluate/{seed}")
+    candidates.append(f"./Checkpoints/{disease}/{model_name}/{seed}")
+    return candidates
+
+
+def _find_checkpoint_dir_with_file(
+    disease: str,
+    seed: int,
+    phase,
+    model_name: str,
+    fold_name: str | None,
+    filename: str,
+) -> str:
+    import glob
+
+    candidates = _eval_checkpoint_candidates(disease, seed, phase, model_name, fold_name)
+    for c in candidates:
+        if os.path.isdir(c) and os.path.isfile(os.path.join(c, filename)):
+            return c
+    hits = []
+    for c in candidates:
+        if os.path.isdir(c):
+            hits += glob.glob(os.path.join(c, "**", filename), recursive=True)
+    if hits:
+        hits.sort(key=len)
+        return os.path.dirname(hits[0])
+    raise FileNotFoundError(f"No {filename} found. Tried under: {candidates}")
 
 
 # 1) 载入已训练模型（best.ckpt）
@@ -34,19 +93,71 @@ def get_trained_model(disease: str,
                       phase: int = 0,
                       model_name: str | None = None,
                       fold_name: str | None = None):
-    import glob
     import torch, os
     from skorch import NeuralNetClassifier
     from skorch.dataset import ValidSplit
+
+    eff_arch = model_name or modelconfig.get("model_name") or modelconfig.get("model_type") or "MTMFTransformer"
+
+    if not explainable and eff_arch == "XGBoost":
+        _mn = model_name or "XGBoost"
+        ckpt_dir = _find_checkpoint_dir_with_file(
+            disease, seed, phase, _mn, fold_name, "xgb_classifier.pkl"
+        )
+        import joblib
+
+        path = os.path.join(ckpt_dir, "xgb_classifier.pkl")
+        return joblib.load(path)
 
     lr = float(modelconfig['lr'])
     batch_size = int(modelconfig['batch_size'])
     modelconfig = dict(modelconfig)
     modelconfig.pop('lr'); modelconfig.pop('batch_size')
 
+    _FT_MAKE_KEYS = (
+        "n_num_features",
+        "cat_cardinalities",
+        "n_blocks",
+        "last_layer_query_idx",
+        "d_out",
+        "kv_compression_ratio",
+        "kv_compression_sharing",
+    )
+
     # 1) 构建模型（解释/非解释）
+    # 【原逻辑】非可解释时一律：model = MTMFTransformer(**modelconfig).to("cuda")
     if not explainable:
-        model = MTMFTransformer(**modelconfig).to("cuda")
+        if eff_arch == "MBT":
+            cfg = dict(modelconfig)
+            cfg.pop('btn_init', None)
+            cfg.pop('use_cross_atn', None)
+            model = MBT(**cfg).to("cuda")
+        elif eff_arch == "MVIB":
+            cfg = dict(modelconfig)
+            for k in ("btn_init", "use_cross_atn", "use_bottleneck"):
+                cfg.pop(k, None)
+            model = MVIB(**cfg).to("cuda")
+        elif eff_arch == "MDL4Microbiome":
+            cfg = dict(modelconfig)
+            for k in ("btn_init", "use_cross_atn", "use_bottleneck"):
+                cfg.pop(k, None)
+            model = MDL4Microbiome(**cfg).to("cuda")
+        elif eff_arch in ("FT", "FT-Concat"):
+            cfg = {k: modelconfig[k] for k in _FT_MAKE_KEYS if k in modelconfig}
+            if "cat_cardinalities" not in cfg:
+                cfg["cat_cardinalities"] = None
+            model = FTTransformer.make_default(**cfg).to("cuda")
+        elif eff_arch == "FT-Vote":
+            model = FT_Vote(**modelconfig).to("cuda")
+        elif eff_arch == "MLP":
+            cfg = {
+                "in_dim": int(modelconfig["in_dim"]),
+                "hidden_dims": modelconfig.get("hidden_dims"),
+                "dropout": float(modelconfig.get("dropout", 0.1)),
+            }
+            model = TabularMLP(**cfg).to("cuda")
+        else:
+            model = MTMFTransformer(**modelconfig).to("cuda")
     else:
         model = MTMFTransformer_explainable(**modelconfig).to("cuda")
 
@@ -70,50 +181,11 @@ def get_trained_model(disease: str,
 
     # 2) 推断模型名（用于路径）
     if model_name is None:
-        model_name = modelconfig.get('model_name') or modelconfig.get('model_type') or "MTMFTransformer"
+        model_name = eff_arch
 
-    # 3) 候选 checkpoint 目录（谁先命中用谁）
-    candidates = []
-
-    # 推荐结构：./Checkpoints/{disease}/phase{phase}/{model_name}/{seed}/[fold]
-    base_phase = f"./Checkpoints/{disease}/phase{phase}/{model_name}/{seed}"
-    if fold_name:
-        candidates.append(os.path.join(base_phase, fold_name))
-    candidates.append(base_phase)
-    # === 在 candidates 列表组装处，追加这两条 ===
-    # 若 phase == 0，同时去 baseline 下找
-    if str(phase) == "0" or phase == 0:
-        candidates.append(f"./Checkpoints/{disease}/evaluate/seed{seed}/baseline")
-
-    # 若 disease 形如 'CRC4_holdout/phase0'，也尝试 baseline
-    parts = str(disease).split("/")
-    if len(parts) >= 2:
-        candidates.append(f"./Checkpoints/{disease}/evaluate/seed{seed}/baseline")
-
-    # 你当前的结构：./Checkpoints/{disease}/evaluate/seed{seed}/phase{phase}
-    candidates.append(f"./Checkpoints/{disease}/evaluate/seed{seed}/phase{phase}")
-
-    # 老结构：./Checkpoints/{disease}/evaluate/{seed}
-    candidates.append(f"./Checkpoints/{disease}/evaluate/{seed}")
-
-    # 兜底：./Checkpoints/{disease}/{model_name}/{seed}
-    candidates.append(f"./Checkpoints/{disease}/{model_name}/{seed}")
-
-    ckpt_dir = None
-    for c in candidates:
-        if os.path.isdir(c) and os.path.isfile(os.path.join(c, "model_best.pkl")):
-            ckpt_dir = c
-            break
-    if ckpt_dir is None:
-        hits = []
-        for c in candidates:
-            if os.path.isdir(c):
-                hits += glob.glob(os.path.join(c, "**/model_best.pkl"), recursive=True)
-        if hits:
-            hits.sort(key=len)
-            ckpt_dir = os.path.dirname(hits[0])
-        else:
-            raise FileNotFoundError(f"No checkpoint found. Tried: {candidates}")
+    ckpt_dir = _find_checkpoint_dir_with_file(
+        disease, seed, phase, model_name, fold_name, "model_best.pkl"
+    )
 
     # 4) 加载：优先用 skorch 原生；失败则手动兼容（剥 module. 前缀，strict=False）
     net.initialize()
@@ -153,6 +225,14 @@ def get_trained_model(disease: str,
             # 松加载：忽略不匹配的键
             missing, unexpected = net.module_.load_state_dict(new_sd, strict=False)
             print(f"[WARN] Fallback strict=False load. missing={len(missing)}, unexpected={len(unexpected)}")
+            allow_loose = os.environ.get("MSFT_ALLOW_LOOSE_CKPT", "").lower() in ("1", "true", "yes")
+            if not allow_loose and len(missing) > 30:
+                raise RuntimeError(
+                    f"Checkpoint 与当前模型结构严重不匹配（目录: {ckpt_dir}）。"
+                    "常见原因：旧版把各 model_type 写在同一 evaluate/seed 下，后被其它模型覆盖。"
+                    "请删除该目录下 model_best.pkl 并清空 results 中对应 fold 记录后重训本模型；"
+                    "或设置 MSFT_ALLOW_LOOSE_CKPT=1 强制加载（不推荐，指标可能无效）。"
+                ) from e
         else:
             # 若文件并非纯 state_dict，仍退回 skorch 接口（抛原异常更清晰）
             raise e

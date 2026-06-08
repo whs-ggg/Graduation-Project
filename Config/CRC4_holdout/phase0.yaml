@@ -20,6 +20,31 @@ FT:
     n_blocks: 2  # 块数
     lr: 0.0001  # 学习率
     batch_size: 16  # 批量大小
+  ko,species,untarget_pos,untarget_neg:
+    # 与 MTMF/MBT 四模态对齐 lr、batch，便于对比
+    n_blocks: 1
+    lr: 1e-5
+    batch_size: 4
+
+MVIB:
+  ko,species,untarget_pos,untarget_neg:
+    # Multimodal Variational Information Bottleneck (Grazioli et al., PLOS Comput Biol 2022)
+    latent_dim: 128
+    beta: 1.0e-5
+    dropout: 0.4
+    marker_encoder_threshold: 2048
+    lr: 1e-5
+    batch_size: 4
+
+MDL4Microbiome:
+  ko,species,untarget_pos,untarget_neg:
+    small_hidden: [200, 100, 50]
+    large_hidden: [500, 100, 50]
+    head_hidden: [50, 25]
+    large_branch_modal_indices: [0]
+    dropout: 0.1
+    lr: 1e-5
+    batch_size: 4
 
 MBT:
   ko,species:
@@ -29,15 +54,55 @@ MBT:
     hidden_size: 0  # 隐藏层大小
     lr: 0.00006  # 学习率
     batch_size: 8  # 批量大小
+  ko,species,untarget_pos,untarget_neg:
+    # 与上方 MTMFTransformer 四模态对齐 lr/batch/n_layers/num_bottleneck，便于指标对比
+    n_layers: 1
+    m_layers: 3
+    num_bottleneck: 8
+    hidden_size: 0
+    lr: 1e-5
+    batch_size: 4
 
 FT-Concat:
   ko,species:
     n_blocks: 3  # 块数
     lr: 0.00001  # 学习率
     batch_size: 16  # 批量大小
+  ko,species,untarget_pos,untarget_neg:
+    # 与 FT 四模态对齐 lr、batch，便于对比
+    n_blocks: 1
+    lr: 1e-5
+    batch_size: 4
 
 FT-Vote:
   ko,species:
     n_blocks: 2  # 块数
     lr: 0.0001  # 学习率
     batch_size: 8  # 批量大小
+  ko,species,untarget_pos,untarget_neg:
+    # 与 FT 四模态对齐 lr、batch，便于对比
+    n_blocks: 1
+    lr: 1e-5
+    batch_size: 4
+
+MLP:
+  ko,species,untarget_pos,untarget_neg:
+    hidden_dims: [512, 256]
+    dropout: 0.2
+    lr: 1e-5
+    batch_size: 4
+
+XGBoost:
+  ko,species,untarget_pos,untarget_neg:
+    n_estimators: 500
+    max_depth: 6
+    learning_rate: 0.05
+    early_stopping_rounds: 20
+    subsample: 0.9
+    colsample_bytree: 0.9
+    reg_lambda: 1.0
+    reg_alpha: 0.0
+    min_child_weight: 1
+    n_jobs: -1
+    lr: 0.05
+    batch_size: 1

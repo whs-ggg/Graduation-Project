@@ -1,0 +1,2 @@
+small_hidden,large_hidden,head_hidden,large_branch_modal_indices,dropout,lr,batch_size,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+"[200, 100, 50]","[500, 100, 50]","[50, 25]",[0],0.1,1e-05,4,433,phase3,"ko,species,untarget_pos,untarget_neg",holdout-phase3-seed433,0.8396,0.8214,0.7059,1.0,0.8276

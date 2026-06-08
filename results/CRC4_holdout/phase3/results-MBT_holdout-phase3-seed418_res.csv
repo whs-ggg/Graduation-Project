@@ -1,0 +1,2 @@
+n_layers,m_layers,num_bottleneck,hidden_size,lr,batch_size,use_bottleneck,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+1,3,8,0,1e-05,4,True,418,phase3,"ko,species,untarget_pos,untarget_neg",holdout-phase3-seed418,0.6791,0.6429,0.7059,0.7059,0.7059

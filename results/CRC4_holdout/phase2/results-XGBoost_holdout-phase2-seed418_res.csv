@@ -1,0 +1,2 @@
+n_estimators,max_depth,learning_rate,early_stopping_rounds,subsample,colsample_bytree,reg_lambda,reg_alpha,min_child_weight,n_jobs,lr,batch_size,n_num_features,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+500,6,0.05,20,0.9,0.9,1.0,0.0,1,-1,0.05,1,5109,418,phase2,"ko,species,untarget_pos,untarget_neg",holdout-phase2-seed418,1.0,0.9643,0.9412,1.0,0.9697

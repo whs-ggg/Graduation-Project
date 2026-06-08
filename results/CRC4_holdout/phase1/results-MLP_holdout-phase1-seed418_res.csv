@@ -1,0 +1,2 @@
+hidden_dims,dropout,lr,batch_size,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+"[512, 256]",0.2,1e-05,4,418,phase1,"ko,species,untarget_pos,untarget_neg",holdout-phase1-seed418,0.9893,0.9643,0.9412,1.0,0.9697

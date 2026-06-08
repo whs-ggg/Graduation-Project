@@ -1,0 +1,2 @@
+latent_dim,beta,dropout,marker_encoder_threshold,lr,batch_size,seed,mode,feature,fold,AUC,ACC,Recall,Precision,F1
+128,1e-05,0.4,2048,1e-05,4,388,phase3,"ko,species,untarget_pos,untarget_neg",holdout-phase3-seed388,0.6738,0.6429,0.6471,0.7333,0.6875
